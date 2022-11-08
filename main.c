@@ -12,6 +12,7 @@
 #define ARG_LIM 512
 #define INPUT_LIM 2048
 
+int childExitMethod = -5;
 int SIGINT_flag = 0;
 int SIGTSTP_flag = 0;
 int backgroundAllowed = 1;         // 1 indicates background is allowed
@@ -36,7 +37,7 @@ void updateIO(char** commandList, int* commandNum, int backgroundFlag)
             }
             else
             {
-                perror("An error occurred while trying to open /dev/null.");
+                perror("An error occurred while trying to redirect input/output.");
                 exit(1);
             }
         }
@@ -48,11 +49,13 @@ void updateIO(char** commandList, int* commandNum, int backgroundFlag)
             int validate = dup2(fileDescriptor, STDIN_FILENO);
             if (validate != -1)
             {
+                // printf("Input updated to %s\n", commandList[index + 1]);
+                // fflush(stdout);
                 redirectionFlag = 1;
             }
             else
             {
-                perror("An error occurred while trying to open the file.");
+                perror("An error occurred while trying to redirect input.");
                 exit(1);
             }
         }
@@ -64,11 +67,13 @@ void updateIO(char** commandList, int* commandNum, int backgroundFlag)
             int validate = dup2(fileDescriptor, STDOUT_FILENO);
             if (validate != -1)
             {
+                // printf("Output updated to %s\n", commandList[index + 1]);
+                // fflush(stdout);
                 redirectionFlag = 1;
             }
             else
             {
-                perror("An error occurred while trying to open the file.");
+                perror("An error occurred while trying to redirect output.");
                 exit(1);
             }
         }
@@ -93,7 +98,7 @@ int checkBackground(char** commandList, int* commandNum)
     if (strcmp(commandList[*commandNum - 1], "&") == 0)
     {
         *commandNum -= 1;
-        commandList[*commandNum] = NULL;            // removes the character from the array
+        commandList[*commandNum - 1] = NULL;            // removes the character from the array
         return 1;
     }
     
@@ -129,7 +134,7 @@ void executeOther(char** commandList, int* commandNum)
 {
     int backgroundFlag;
     pid_t spawnpid = -5;
-    int childExitStatus = -5;
+    childExitMethod = -5;
     // Special signal rules; ignore SIGINT and SIGSTP
     struct sigaction SIGINT_action = {0}, SIGTSTP_action = {0};
 
@@ -145,18 +150,23 @@ void executeOther(char** commandList, int* commandNum)
     SIGINT_action.sa_flags = 0;
     sigaction(SIGINT, &SIGINT_action, NULL);
 
+    // Create child process
+    spawnpid = fork();
+    // printf("Created process with id %d\n", spawnpid);
+    // fflush(stdout);
+
     // Check if the process should run in the background (user entered &), set backgroundFlag
     if (backgroundAllowed == 1)
     {
-        int backgroundFlag = checkBackground(commandList, commandNum);
+        backgroundFlag = checkBackground(commandList, commandNum);
     }
     else
     {
-        int backgroundFlag = 0;         // if background processes are not allowed, then the background flag is set to 0 (process will run in foreground)
+        backgroundFlag = 0;         // if background processes are not allowed, then the background flag is set to 0 (process will run in foreground)
     }
+    // printf("Current value of backgroundFlag: %d\n", backgroundFlag);
+    // fflush(stdout);
 
-    // Create child process
-    spawnpid = fork();
     switch (spawnpid)
     {
         // If something went wrong, no child process created and parent process gets return value of -1
@@ -166,7 +176,8 @@ void executeOther(char** commandList, int* commandNum)
         
         // Child process
         case 0:
-            printf("Child process is running.\n");
+            // printf("Child process is running.\n");
+            // fflush(stdout);
             if (backgroundFlag == 0)
             {
                 SIGINT_action.sa_handler = SIG_DFL;
@@ -176,18 +187,89 @@ void executeOther(char** commandList, int* commandNum)
             updateIO(commandList, commandNum, backgroundFlag);
             if (SIGINT_flag != 1 && SIGTSTP_flag != 1 && execvp(commandList[0], commandList))
             {
-                fprintf(stderr, "The '%s' command could not be executed because it is unknown.", commandList[0]);
+                fprintf(stderr, "The '%s' command could not be found.\n", commandList[0]);
                 exit(1);
             }
-            break;
 
-        // TODO: IMPLEMENT PARENT PROCESS
-        // Parent Process
-        default:
-            printf("Parent process is running.\n");
+            if (backgroundFlag == 1)
+            {
+                // Continues as long as waitpid() does not return due to the delivery of a signal to the calling process
+                while (spawnpid != -1)
+                {
+                    // Requests status of any child process without suspending execution
+                    spawnpid = waitpid(-1, &childExitMethod, WNOHANG);
 
+                    // Prints once the child has exited
+                    if (WIFEXITED(childExitMethod) && spawnpid > 0)
+                    {
+                        int exitStatus = WEXITSTATUS(childExitMethod);
+                        printf("background pid %d is done: exit value: %d\n", spawnpid, exitStatus);
+                        fflush(stdout);
+                    }
+
+                    // Prints once the child has been terminated by a signal
+                    else if (WIFSIGNALED(childExitMethod) && spawnpid > 0 && backgroundAllowed == 0)
+                    {
+                        int termSignal = WTERMSIG(childExitMethod);
+                        printf("background pid %d is done: terminated by signal %d\n", spawnpid, termSignal);
+                        fflush(stdout);
+                    }
+                }
+            }
 
             exit(0); break;
+
+        // Parent Process
+        default:
+            // printf("Parent process is running. Value of backgroundFlag: %d\n", backgroundFlag);
+            // fflush(stdout);
+            // Checks if the child is running in the background
+            if (backgroundFlag == 1)
+            {
+                printf("background pid is %d\n", spawnpid);
+                fflush(stdout);
+            }
+            else
+            {
+                // Waits for child to terminate
+                waitpid(spawnpid, &childExitMethod, 0);
+                
+                // Checks if there could potentially be background processes running
+                if (SIGTSTP_flag != 1) 
+                {
+                    // Check if the child was terminated by a signal
+                    if (WTERMSIG(childExitMethod) != 0 && WIFSIGNALED(childExitMethod) == 1)
+                    {
+                        int termSignal = WTERMSIG(childExitMethod);
+                        printf("terminated by signal %d\n", termSignal);
+                        fflush(stdout);
+                    }
+
+                    // Continues as long as waitpid() does not return due to the delivery of a signal to the calling process
+                    while (spawnpid != -1)
+                    {
+                        // Requests status of any child process without suspending execution
+                        spawnpid = waitpid(-1, &childExitMethod, WNOHANG);
+
+                        // Prints once the child has exited
+                        if (WIFEXITED(childExitMethod) && spawnpid > 0)
+                        {
+                            int exitStatus = WEXITSTATUS(childExitMethod);
+                            printf("background pid %d is done: exit value: %d\n", spawnpid, exitStatus);
+                            fflush(stdout);
+                        }
+
+                        // Prints once the child has been terminated by a signal
+                        else if (WIFSIGNALED(childExitMethod) && spawnpid > 0 && backgroundAllowed == 0)
+                        {
+                            int termSignal = WTERMSIG(childExitMethod);
+                            printf("background pid %d is done: terminated by signal %d\n", spawnpid, termSignal);
+                            fflush(stdout);
+                        }
+                    }
+                }
+            }
+        break;
     }
     // Executed by both parent and child
 }
@@ -197,9 +279,18 @@ void executeOther(char** commandList, int* commandNum)
 *   Checks for built-in commands in the entered line.
 *   Returns 0 if a built-in command was executed, otherwise returns 1
 */
-int checkBuiltIn(char** commandList, int* commandNum, int status)
+int checkBuiltIn(char** commandList, int* commandNum)
 {
     int commandExecFlag = 1;
+
+    // Handling Comments
+    if (commandList[0][0] == '#')
+    {
+        commandExecFlag = 0;
+        // printf("Comment detected. Continuing to the next iteration!\n");
+        // fflush(stdout);
+    }
+
     // Checks for the exit command
     if (strcmp(commandList[0], "exit") == 0)
     {
@@ -229,13 +320,13 @@ int checkBuiltIn(char** commandList, int* commandNum, int status)
     else if (strcmp(commandList[0], "status") == 0)
     {
         commandExecFlag = 0;
-        if (WIFEXITED(status))
+        if (WIFEXITED(childExitMethod))
         {
-            printf("Exit status: %d\n", WEXITSTATUS(status));
+            printf("exit value %d\n", WEXITSTATUS(childExitMethod));
         }
-        else if (WIFSIGNALED(status))
+        else if (WIFSIGNALED(childExitMethod))
         {
-            printf("Terminating signal: %d\n", WTERMSIG(status));
+            printf("terminated by signal %d\n", WTERMSIG(childExitMethod));
         }
         fflush(stdout);
     }
@@ -289,8 +380,8 @@ void getInput(char** commandList, int* commandNum)
 
     if (token == NULL)
     {
-        printf("Blank line detected. Continuing to the next iteration!\n");
-        fflush(stdout);
+        // printf("Blank line detected. Continuing to the next iteration!\n");
+        // fflush(stdout);
     }
 
     // Collect the tokens
@@ -298,17 +389,11 @@ void getInput(char** commandList, int* commandNum)
     {
         char currentCommand[INPUT_LIM];
         strcpy(currentCommand, token);
-        printf("Current command: '%s'\n", currentCommand);
-        fflush(stdout);
+        //printf("Current command: '%s'\n", currentCommand);
+        //fflush(stdout);
 
-        // Handling Comments
-        if (currentCommand[0] == '#')
-        {
-            printf("Comment detected. Continuing to the next iteration!\n");
-            fflush(stdout);
-        }
         // Replacing $$ with process ID
-        else if (strstr(currentCommand, "$$") != NULL)
+        if (strstr(currentCommand, "$$") != NULL)
         {
             char* position = strstr(currentCommand, "$$");
             char smallshPidStr[6];                          // process IDs will not be larger than 99999, plus one character for null terminator
@@ -339,7 +424,6 @@ int main()
 {
     char* commandList[ARG_LIM];
     int commandNum;
-    int status;
 
     // Repeatedly asks for user input
     while (1)
@@ -349,20 +433,18 @@ int main()
 
         getInput(commandList, &commandNum);
 
-        // printf("Command list: ");
-        // for (int index = 0; index < commandNum; index++)
-        // {
-        //     if (commandList[index] != NULL)
-        //     {
-        //         printf("%s, ", commandList[index]);
-        //     }
-        // }
-        // printf("\n");
-
         // Spawns child processes if no built-in commands were entered
-        if (checkBuiltIn(commandList, &commandNum, status) == 1)
+        if (checkBuiltIn(commandList, &commandNum) == 1)
         {
             executeOther(commandList, &commandNum);
         }
+
+        // Reset commandList and commandNum for the next iteration
+
+        for (int index = 0; index < commandNum; index++)
+        {
+            commandList[index] = NULL;
+        }
+        int commandNum;
     }
 }
