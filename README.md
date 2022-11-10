@@ -19,7 +19,7 @@ gcc --std=gnu99 -o smallsh main.c
 ./smallsh
 ```
 
-You can run the test script with the following command:
+You can run the test script by placing it in the same directory as the compiled shell, calling chmod (*chmod +x ./p3testscript*) upon first use, and then typing the following command:
 ```
 ./p3testscript 2>&1
 ```
