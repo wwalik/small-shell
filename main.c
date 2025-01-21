@@ -342,7 +342,7 @@ int replaceChars(char* originalStr, char* replacementStr, char* position)
 
     // Copies the characters after $$
     memcpy(endOfStr, (position + 2), (strlen(originalStr) - strlen(startOfStr) - 2));
-    sprintf(endOfStr, "%s\0", endOfStr);
+    sprintf(endOfStr, "%s", endOfStr);
 
     // Puts the whole string together
     sprintf(originalStr, "%s%s%s", startOfStr, replacementStr, endOfStr);
