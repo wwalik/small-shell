@@ -1,5 +1,5 @@
 # Small Shell 
-*Author: Julia Melchert | Date Last Updated: 11/7/2022*
+*Author: Julia Melchert | Date Last Updated: 21/1/2025*
 
 This program creates a shell that accounts for the following:
 * Provide a prompt for running commands
