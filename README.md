@@ -15,7 +15,7 @@ It utilizes the **C** programming language.
 
 You can compile and run this program with the following commands:
 ```
-gcc --std=gnu99 -o smallsh main.c
+make
 ./smallsh
 ```
 
