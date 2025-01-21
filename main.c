@@ -407,6 +407,11 @@ void getInput(char** commandList, int* commandNum)
         token = strtok_r(NULL, " \n", &saveptr);
     }
 
+    // execvp expects a NULL byte after the arguments
+    // see "man exec" for more details
+    // this is what prevented the shell from executing processes
+    commandList[*commandNum] = NULL;
+
     free(lineEntered);
     lineEntered = NULL;
 }
